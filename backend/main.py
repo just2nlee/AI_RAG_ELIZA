@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import date
 from typing import Generator
 
 import chromadb
@@ -18,7 +19,7 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 sys.path.insert(0, os.path.dirname(__file__))
 from retrieval import Chunk, format_chunks, retrieve
 
-SYSTEM_PROMPT = """You are a senior financial analyst at a consulting firm. \
+_SYSTEM_PROMPT_TEMPLATE = """Today's date is {today}. You are a senior financial analyst at a consulting firm. \
 You have been given excerpts from SEC filings (10-K annual reports and 10-Q \
 quarterly reports) to answer a client's business question.
 
@@ -27,6 +28,7 @@ Your answer must:
 - Provide a structured breakdown (by company if multi-company, by theme if thematic)
 - Cite every claim with [TICKER FILING_TYPE PERIOD] inline
 - Flag where data is limited or absent in the provided excerpts
+- If the question references a time window (e.g. "last two years"), explicitly note any cited sources that fall outside that window
 - Be written for a C-suite audience: precise, professional, no filler
 
 Do NOT:
@@ -36,6 +38,10 @@ Do NOT:
 - Infer data for a company that has no relevant excerpts — state the absence explicitly
 
 Answer only from the provided excerpts."""
+
+
+def get_system_prompt() -> str:
+    return _SYSTEM_PROMPT_TEMPLATE.format(today=date.today().strftime("%B %d, %Y"))
 
 app = FastAPI(title="SEC RAG API")
 app.add_middleware(
@@ -94,7 +100,7 @@ def stream_response(chunks: list[Chunk], question: str) -> Generator[str, None, 
     stream = openai_client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": get_system_prompt()},
             {"role": "user", "content": user_prompt},
         ],
         stream=True,

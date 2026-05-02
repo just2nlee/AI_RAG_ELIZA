@@ -31,7 +31,20 @@ CLIENT QUESTION:
 
 ---
 
-## v2 — Planned: add negative constraints
+## v2 — Date injection + temporal window flag (2026-05-02)
+
+**What changed:**
+- System prompt is now dynamic — today's date is injected at request time (`Today's date is {today}.`)
+- Added instruction: "If the question references a time window (e.g. 'last two years'), explicitly note any cited sources that fall outside that window"
+- Added remaining negative constraints from v1 plan
+
+**Why:** Without a date anchor, the model had no basis to interpret relative time references like "the last two years." It would include 2023 data in a "last two years" query even though today is May 2026. Injecting the current date gives the model the context to flag out-of-window sources. The temporal flagging instruction tells it to surface that information explicitly rather than silently including stale data.
+
+**Status:** Implemented and live.
+
+---
+
+## v3 — Planned: add negative constraints (original v2 plan)
 
 **What to change:** Add explicit out-of-scope / "do not" instructions to the system prompt.
 
