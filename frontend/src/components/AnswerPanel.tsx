@@ -18,7 +18,7 @@ export function AnswerPanel({ answer, sources, isStreaming }: AnswerPanelProps) 
   return (
     <div className="w-full space-y-4">
       <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="max-w-none text-sm leading-relaxed">
+        <div className="prose prose-slate prose-sm max-w-none prose-headings:font-semibold prose-h2:text-base prose-h3:text-sm prose-h3:text-slate-600">
           <ReactMarkdown>{answer}</ReactMarkdown>
           {isStreaming && (
             <span className="inline-block w-2 h-4 bg-[#0066CC] ml-0.5 animate-pulse" />
