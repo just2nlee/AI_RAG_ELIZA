@@ -20,7 +20,9 @@
 
 ## Post-build fixes (2026-05-02)
 
-9. **Time-window filtering must happen at retrieval, not in the prompt** — When the user asks "last two years," a prompt-only constraint ("do not cite old data") is unreliable because the model still sees 2022/2023 chunks in its context and uses them. The correct approach is to detect the time window in the query, calculate a cutoff year, fetch 3× more chunks from ChromaDB, and filter out out-of-window chunks before anything reaches the LLM. Implemented in `retrieve()` via `parse_time_window()`.
+9. **Company name detection must cover plain English names, not just ticker symbols** — The original assumption was that users would type "AAPL" or "TSLA." In practice, users write "Apple", "Tesla", "JPMorgan." Without name→ticker mapping, `detect_tickers` returns nothing, the per-ticker sub-query logic never fires, and one company dominates semantic search results. Fixed by adding `NAME_TO_TICKER` dict in `retrieval.py` that maps common names and aliases to their tickers before the ChromaDB sub-queries run.
+
+10. **Time-window filtering must happen at retrieval, not in the prompt** — When the user asks "last two years," a prompt-only constraint ("do not cite old data") is unreliable because the model still sees 2022/2023 chunks in its context and uses them. The correct approach is to detect the time window in the query, calculate a cutoff year, fetch 3× more chunks from ChromaDB, and filter out out-of-window chunks before anything reaches the LLM. Implemented in `retrieve()` via `parse_time_window()`.
 
 10. **Today's date must be injected into the system prompt** — Without a date anchor, the model cannot correctly interpret relative time references like "the last two years." The system prompt is now dynamic: `get_system_prompt()` in `backend/main.py` stamps the current date at request time so the model knows what "now" means.
 

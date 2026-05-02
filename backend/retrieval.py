@@ -22,6 +22,29 @@ KNOWN_TICKERS = {
     "UNH", "UPS", "V", "VZ", "WMT", "XOM",
 }
 
+# Common company name → ticker mappings so users can write "Apple" instead of "AAPL"
+NAME_TO_TICKER: dict[str, str] = {
+    "APPLE": "AAPL", "MICROSOFT": "MSFT", "AMAZON": "AMZN", "NVIDIA": "NVDA",
+    "GOOGLE": "GOOG", "ALPHABET": "GOOG", "META": "META", "TESLA": "TSLA",
+    "JPMORGAN": "JPM", "JP MORGAN": "JPM", "CHASE": "JPM",
+    "BERKSHIRE": "BRK", "VISA": "V", "MASTERCARD": "MA",
+    "WALMART": "WMT", "EXXON": "XOM", "JOHNSON": "JNJ",
+    "UNITEDHEALTH": "UNH", "ABBVIE": "ABBV", "PFIZER": "PFE",
+    "MERCK": "MRK", "ELI LILLY": "LLY", "LILLY": "LLY",
+    "BROADCOM": "AVGO", "NETFLIX": "NFLX", "ADOBE": "ADBE",
+    "SALESFORCE": "CRM", "ORACLE": "ORCL", "INTEL": "INTC",
+    "QUALCOMM": "QCOM", "AMD": "AMD", "GOLDMAN": "GS",
+    "BANK OF AMERICA": "BAC", "BLACKROCK": "BLK", "CATERPILLAR": "CAT",
+    "BOEING": "BA", "COMCAST": "CMCSA", "COSTCO": "COST",
+    "HOME DEPOT": "HD", "MCDONALD": "MCD", "NIKE": "NKE",
+    "PEPSI": "PEP", "PEPSICO": "PEP", "PROCTER": "PG",
+    "RAYTHEON": "RTX", "STARBUCKS": "SBUX", "AT&T": "T",
+    "UPS": "UPS", "VERIZON": "VZ", "DISNEY": "DIS",
+    "GENERAL ELECTRIC": "GE", "DEERE": "DE", "IBMS": "IBM",
+    "CHEVRON": "CVX", "CISCO": "CSCO", "AMERICAN EXPRESS": "AXP",
+    "LOCKHEED": "LMT",
+}
+
 
 @dataclass
 class Chunk:
@@ -98,13 +121,21 @@ def _year_from_period(period: str) -> int | None:
 
 
 def detect_tickers(query: str) -> list[str]:
-    """Find known ticker symbols mentioned in the query."""
+    """Find known ticker symbols or company names mentioned in the query."""
     query_upper = query.upper()
-    found = []
+    found: set[str] = set()
+
+    # Match exact ticker symbols
     for ticker in KNOWN_TICKERS:
         if re.search(rf"\b{re.escape(ticker)}\b", query_upper):
-            found.append(ticker)
-    return found
+            found.add(ticker)
+
+    # Match common company names and map to tickers
+    for name, ticker in NAME_TO_TICKER.items():
+        if re.search(rf"\b{re.escape(name)}\b", query_upper):
+            found.add(ticker)
+
+    return list(found)
 
 
 def retrieve(query: str, openai_client, collection) -> list[Chunk]:

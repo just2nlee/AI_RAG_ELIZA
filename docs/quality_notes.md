@@ -15,7 +15,7 @@ Manual spot-checks against three representative questions covering the main quer
 - [x] No cross-company data conflation
 - [x] Executive summary present
 
-**Notes:** Tested 2026-05-02. Answer structured by company with inline citations. AAPL and JPM were flagged as absent from retrieved excerpts (retrieval returned mostly TSLA chunks for this query) — the model correctly stated "no information provided" rather than hallucinating. Sources: 11 filings cited, all TSLA. This is expected behavior; a production system would tune `per_ticker_k` upward or add a minimum-per-ticker guarantee.
+**Notes:** Tested 2026-05-02. Initially failed — retrieval returned only TSLA chunks because `detect_tickers` only matched exact ticker symbols, so "Apple", "Tesla", "JPMorgan" returned no matches, the per-ticker sub-query logic never fired, and TSLA dominated by raw semantic similarity. Fixed by adding `NAME_TO_TICKER` mapping in `retrieval.py`. After fix, all three companies appear in sources and the answer provides balanced coverage. See `docs/assumptions.md` assumption #9.
 
 ---
 
