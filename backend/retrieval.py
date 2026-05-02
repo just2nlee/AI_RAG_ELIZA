@@ -1,6 +1,7 @@
 from __future__ import annotations
 import re
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 import tiktoken
@@ -74,6 +75,28 @@ def format_chunks(chunks: list[Chunk]) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+_YEAR_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
+
+
+def parse_time_window(query: str) -> int | None:
+    """Return inclusive cutoff year if query contains 'last/past N years', else None.
+    E.g. 'last two years' in 2026 → 2024 (include 2024 and 2025, exclude 2023 and earlier).
+    """
+    match = re.search(r"(?:last|past)\s+(\w+|\d+)\s+year", query.lower())
+    if not match:
+        return None
+    raw = match.group(1)
+    n = int(raw) if raw.isdigit() else _YEAR_WORDS.get(raw)
+    if n is None:
+        return None
+    return date.today().year - n
+
+
+def _year_from_period(period: str) -> int | None:
+    m = re.match(r"(\d{4})", period)
+    return int(m.group(1)) if m else None
+
+
 def detect_tickers(query: str) -> list[str]:
     """Find known ticker symbols mentioned in the query."""
     query_upper = query.upper()
@@ -85,15 +108,32 @@ def detect_tickers(query: str) -> list[str]:
 
 
 def retrieve(query: str, openai_client, collection) -> list[Chunk]:
-    """Retrieve top-k relevant chunks from ChromaDB."""
+    """Retrieve top-k relevant chunks from ChromaDB, filtered by time window if specified."""
     tickers = detect_tickers(query)
+    cutoff_year = parse_time_window(query)
+    # Fetch extra chunks upfront so filtering doesn't leave us short
+    fetch_k = TOP_K * 3 if cutoff_year else TOP_K
 
     def embed(text: str) -> list[float]:
         resp = openai_client.embeddings.create(model=EMBEDDING_MODEL, input=[text])
         return resp.data[0].embedding
 
+    def make_chunk(doc: str, meta: dict) -> Chunk:
+        return Chunk(
+            text=doc,
+            ticker=meta["ticker"],
+            filing_type=meta["filing_type"],
+            period=meta["period"],
+        )
+
+    def within_window(chunk: Chunk) -> bool:
+        if cutoff_year is None:
+            return True
+        yr = _year_from_period(chunk.period)
+        return yr is not None and yr >= cutoff_year
+
     if len(tickers) > 1:
-        per_ticker_k = max(5, TOP_K // len(tickers))
+        per_ticker_k = max(5, fetch_k // len(tickers))
         seen: dict[str, Chunk] = {}
         for ticker in tickers:
             results = collection.query(
@@ -104,25 +144,17 @@ def retrieve(query: str, openai_client, collection) -> list[Chunk]:
             for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
                 key = doc[:80]
                 if key not in seen:
-                    seen[key] = Chunk(
-                        text=doc,
-                        ticker=meta["ticker"],
-                        filing_type=meta["filing_type"],
-                        period=meta["period"],
-                    )
-        return list(seen.values())[:TOP_K]
+                    seen[key] = make_chunk(doc, meta)
+        chunks = [c for c in seen.values() if within_window(c)]
+        return chunks[:TOP_K]
 
     embedding = embed(query)
-    kwargs: dict = {"query_embeddings": [embedding], "n_results": TOP_K}
+    kwargs: dict = {"query_embeddings": [embedding], "n_results": fetch_k}
     if len(tickers) == 1:
         kwargs["where"] = {"ticker": tickers[0]}
     results = collection.query(**kwargs)
-    return [
-        Chunk(
-            text=doc,
-            ticker=meta["ticker"],
-            filing_type=meta["filing_type"],
-            period=meta["period"],
-        )
+    chunks = [
+        make_chunk(doc, meta)
         for doc, meta in zip(results["documents"][0], results["metadatas"][0])
     ]
+    return [c for c in chunks if within_window(c)][:TOP_K]
