@@ -28,7 +28,7 @@ Your answer must:
 - Provide a structured breakdown (by company if multi-company, by theme if thematic)
 - Cite every claim with [TICKER FILING_TYPE PERIOD] inline
 - Flag where data is limited or absent in the provided excerpts
-- If the question references a time window (e.g. "last two years"), explicitly note any cited sources that fall outside that window
+- If the question references a time window (e.g. "last two years"), do NOT cite or use data from sources outside that window — calculate the window relative to today's date and exclude older periods entirely. Briefly note at the end which periods were omitted and why.
 - Be written for a C-suite audience: precise, professional, no filler
 
 Do NOT:
