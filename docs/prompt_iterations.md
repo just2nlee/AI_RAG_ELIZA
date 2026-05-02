@@ -44,6 +44,18 @@ CLIENT QUESTION:
 
 ---
 
+## v2.1 — Retrieval-layer time filtering (2026-05-02)
+
+**What changed:**
+- Prompt instruction updated from "flag out-of-window sources" to "do NOT cite or use data from sources outside that window"
+- More importantly: `retrieve()` in `retrieval.py` now detects time-window phrases ("last N years", "past N years") in the query, calculates the cutoff year relative to today, fetches 3× more chunks from ChromaDB, and filters out chunks whose period falls before the cutoff before passing anything to the LLM
+
+**Why (key talking point for panel):** Prompt-only temporal constraints are unreliable. Even with a strong "do not use old data" instruction, the model still sees 2022/2023 chunks in its context window and uses them — the instruction competes with the in-context evidence. The correct fix is to enforce the time window at the retrieval layer so that out-of-window chunks are never passed to the model in the first place. This is a general principle: use the prompt to shape *how* the model answers, but use retrieval filters to control *what data* it sees. Trying to do both jobs with the prompt alone leads to inconsistent behavior.
+
+**Status:** Implemented and live. "Last two years" from May 2026 correctly surfaces only 2024–2025 filings.
+
+---
+
 ## v3 — Planned: add negative constraints (original v2 plan)
 
 **What to change:** Add explicit out-of-scope / "do not" instructions to the system prompt.
