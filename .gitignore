@@ -1,0 +1,27 @@
+# Environment
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+Lib/
+Scripts/
+
+# Vector DB (large binary, rebuild with index.py)
+chroma_db/
+
+# Raw corpus (large, not part of source code)
+edgar_corpus/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Tools
+.claude/
+.playwright-mcp/
+
+# OS
+.DS_Store
+Thumbs.db
