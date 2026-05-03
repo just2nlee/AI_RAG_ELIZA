@@ -6,6 +6,8 @@ const EXAMPLES = [
   "What are the primary risk factors facing Apple, Tesla, and JPMorgan, and how do they compare?",
   "How has NVIDIA's revenue and growth outlook changed over the last two years?",
   "What regulatory risks do the major pharmaceutical companies face, and how are they addressing them?",
+  "How are NVIDIA and AMD positioning themselves in the AI chip market, and what risks do they face?",
+  "What do JPMorgan, Goldman Sachs, and Bank of America disclose about their exposure to interest rate risk?",
 ];
 
 interface QueryInputProps {
