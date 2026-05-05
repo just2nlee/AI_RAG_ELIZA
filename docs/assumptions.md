@@ -1,29 +1,38 @@
-# Assumptions
+# Design Assumptions
 
-1. **Local ChromaDB is sufficient** — 246 filings at demo scale does not require a cloud vector DB. ChromaDB persists to disk and loads fast enough for a live demo.
+## Build-time assumptions
 
-2. **Semantic search alone is adequate** — BM25 hybrid retrieval not required for this corpus. The business questions are well-formed and embed meaningfully with `text-embedding-3-small`.
+1. **Local ChromaDB is sufficient** — 246 filings at demo scale does not require a cloud vector DB. ChromaDB persists to disk and loads fast enough for a live demo. A managed service (Pinecone, Weaviate) would be appropriate at production scale.
 
-3. **No reranking step** — Top-15 cosine similarity results provide sufficient quality within the 4-hour build constraint. Cohere rerank or similar could be added as a future improvement.
+2. **Semantic search alone is adequate** — BM25 hybrid retrieval is not required for this corpus. The business questions are well-formed and embed meaningfully with `text-embedding-3-small`. Hybrid retrieval would improve precision for exact financial figures (e.g. specific dollar amounts) and would be a natural next step.
 
-4. **Multi-company detection is keyword-based** — Ticker symbols and company names mentioned in the query are detected via string matching against the known ticker list from `manifest.json`. No NER model is needed at this scale.
+3. **No reranking step** — Top-15 cosine similarity results provide sufficient quality for this corpus size. A cross-encoder reranker (e.g. Cohere Rerank) could be added as a future improvement to boost precision on ambiguous queries.
 
-5. **Index is pre-built before the demo** — `index.py` is run once offline. Cold-start indexing time (~5-10 minutes for 246 filings) is not part of the live demo flow.
+4. **Multi-company detection is keyword-based** — Ticker symbols and plain-English company names in the query are detected via string matching against a known ticker list. No NER model is needed at this scale; the known-company universe is fixed and small.
 
-6. **Frontend on localhost:5173, backend on localhost:8000** — Both servers run locally on the presenter's machine. No deployment or cloud hosting required for the panel interview.
+5. **Index is pre-built before the demo** — `index.py` is run once offline. Cold-start indexing time (~10–15 minutes for 246 filings) is not part of the live query flow.
 
-7. **Single question/answer paradigm** — The UI does not maintain chat history. Each query is independent, matching the assessment's single-LLM-call constraint cleanly.
+6. **Single question/answer paradigm** — The UI does not maintain conversation history. Each query is independent, which maps cleanly onto the single-LLM-call constraint.
 
-8. **No authentication or rate limiting** — Demo-only system; no user auth, API key management, or production hardening required.
+7. **No authentication or rate limiting** — Demo-only system; no user auth, API key management, or production hardening required.
 
 ---
 
-## Post-build fixes (2026-05-02)
+## Assumptions invalidated during build
 
-9. **Company name detection must cover plain English names, not just ticker symbols** — The original assumption was that users would type "AAPL" or "TSLA." In practice, users write "Apple", "Tesla", "JPMorgan." Without name→ticker mapping, `detect_tickers` returns nothing, the per-ticker sub-query logic never fires, and one company dominates semantic search results. Fixed by adding `NAME_TO_TICKER` dict in `retrieval.py` that maps common names and aliases to their tickers before the ChromaDB sub-queries run.
+These assumptions were made upfront but proved incorrect during testing. Documented here to show how the design evolved.
 
-10. **Time-window filtering must happen at retrieval, not in the prompt** — When the user asks "last two years," a prompt-only constraint ("do not cite old data") is unreliable because the model still sees 2022/2023 chunks in its context and uses them. The correct approach is to detect the time window in the query, calculate a cutoff year, fetch 3× more chunks from ChromaDB, and filter out out-of-window chunks before anything reaches the LLM. Implemented in `retrieve()` via `parse_time_window()`.
+**8. Users will use ticker symbols in queries**
+Original assumption: users would write "AAPL" or "TSLA." In practice, users write "Apple," "Tesla," "JPMorgan." Without a name→ticker mapping, `detect_tickers` returned nothing for natural language queries, the per-ticker sub-query logic never fired, and one company dominated the semantic search results.
 
-10. **Today's date must be injected into the system prompt** — Without a date anchor, the model cannot correctly interpret relative time references like "the last two years." The system prompt is now dynamic: `get_system_prompt()` in `backend/main.py` stamps the current date at request time so the model knows what "now" means.
+Fix: added `NAME_TO_TICKER` dict in `retrieval.py` mapping common names and aliases to their tickers before the ChromaDB sub-queries run.
 
-11. **Anaconda Python must be used for all backend commands on this machine** — `python` and `python3` on this Windows machine point to non-functional Microsoft Store stubs. All backend commands (pip, uvicorn, pytest) must be run via `C:\Users\justi\anaconda3\python.exe` or `conda run`. Packages are installed into the Anaconda base environment.
+**9. A prompt instruction is sufficient to enforce time-window constraints**
+Original assumption: telling the model "do not cite sources outside the last two years" would reliably exclude old data. In practice the model still used 2022/2023 chunks because they were semantically relevant and visible in its context window — the instruction competed with the in-context evidence and lost.
+
+Fix: time-window filtering moved to the retrieval layer. `retrieve()` now detects the time window in the query, calculates a cutoff year, fetches 3× more chunks, and discards out-of-window chunks before anything reaches the LLM. See `docs/prompt_iterations.md` v2.1 for full rationale.
+
+**10. The model can interpret relative time references without a date anchor**
+Original assumption: phrases like "the last two years" would be interpreted reasonably. In practice the model had no reference point for "now" and produced inconsistent temporal reasoning.
+
+Fix: today's date is injected into the system prompt at request time via `get_system_prompt()` in `backend/main.py`.
