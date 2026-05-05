@@ -19,6 +19,9 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
 sys.path.insert(0, os.path.dirname(__file__))
 from retrieval import Chunk, format_chunks, retrieve
 
+# Today's date is injected at request time so the model can correctly interpret
+# relative time references like "the last two years". A static date in the
+# prompt would drift and produce wrong temporal reasoning over time.
 _SYSTEM_PROMPT_TEMPLATE = """Today's date is {today}. You are a senior financial analyst at a consulting firm. \
 You have been given excerpts from SEC filings (10-K annual reports and 10-Q \
 quarterly reports) to answer a client's business question.
@@ -44,14 +47,18 @@ Answer only from the provided excerpts."""
 def get_system_prompt() -> str:
     return _SYSTEM_PROMPT_TEMPLATE.format(today=date.today().strftime("%B %d, %Y"))
 
+
 app = FastAPI(title="SEC RAG API")
 app.add_middleware(
     CORSMiddleware,
+    # Restrict to localhost only — this is a local demo, not a public API.
     allow_origins=["http://localhost:5173"],
     allow_methods=["POST", "GET"],
     allow_headers=["*"],
 )
 
+# Module-level singletons: OpenAI client and ChromaDB collection are initialized
+# once on first use and reused across requests to avoid reconnection overhead.
 _openai_client: OpenAI | None = None
 _collection = None
 
@@ -80,10 +87,17 @@ class QueryRequest(BaseModel):
 
 
 def stream_response(chunks: list[Chunk], question: str) -> Generator[str, None, None]:
+    """Yield SSE events: sources first, then streamed text deltas, then done.
+
+    Sending sources before the text stream lets the frontend render source badges
+    immediately while the answer is still generating, improving perceived latency.
+    """
     sources = [
         {"ticker": c.ticker, "filing_type": c.filing_type, "period": c.period}
         for c in chunks
     ]
+    # Multiple chunks from the same filing produce duplicate source entries;
+    # deduplicate so the UI shows one badge per filing, not one per chunk.
     seen = set()
     unique_sources = []
     for s in sources:
@@ -98,6 +112,9 @@ def stream_response(chunks: list[Chunk], question: str) -> Generator[str, None, 
         f"FILING EXCERPTS:\n{format_chunks(chunks)}\n\nCLIENT QUESTION:\n{question}"
     )
     openai_client = get_openai_client()
+
+    # temperature=0 for deterministic, factual answers — financial data should
+    # not vary between runs of the same query.
     stream = openai_client.chat.completions.create(
         model="gpt-4o",
         messages=[
@@ -122,11 +139,14 @@ async def query(request: QueryRequest):
     try:
         collection = get_collection()
     except Exception as e:
+        # Surface a clear error if index.py hasn't been run yet
         raise HTTPException(status_code=503, detail=f"Index not ready: {e}")
 
     openai_client = get_openai_client()
     chunks = retrieve(request.question, openai_client, collection)
 
+    # X-Accel-Buffering: no tells nginx not to buffer the SSE stream if this
+    # is ever deployed behind a reverse proxy.
     return StreamingResponse(
         stream_response(chunks, request.question),
         media_type="text/event-stream",

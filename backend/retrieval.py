@@ -6,11 +6,13 @@ from pathlib import Path
 
 import tiktoken
 
-CHUNK_SIZE = 500
-CHUNK_OVERLAP = 50
+CHUNK_SIZE = 500       # tokens per chunk
+CHUNK_OVERLAP = 50     # tokens shared between adjacent chunks to preserve context across boundaries
 EMBEDDING_MODEL = "text-embedding-3-small"
-TOP_K = 15
+TOP_K = 15             # final number of chunks passed to the LLM
 
+# cl100k_base is the tokenizer used by GPT-4 and text-embedding-3-small, so
+# chunk boundaries here align exactly with what the model sees.
 _enc = tiktoken.get_encoding("cl100k_base")
 
 KNOWN_TICKERS = {
@@ -22,7 +24,9 @@ KNOWN_TICKERS = {
     "UNH", "UPS", "V", "VZ", "WMT", "XOM",
 }
 
-# Common company name → ticker mappings so users can write "Apple" instead of "AAPL"
+# Plain-English name → ticker mapping. Users write "Apple" or "JPMorgan", not
+# "AAPL" or "JPM". Without this, detect_tickers returns nothing for natural
+# language queries and the per-ticker balanced retrieval logic never fires.
 NAME_TO_TICKER: dict[str, str] = {
     "APPLE": "AAPL", "MICROSOFT": "MSFT", "AMAZON": "AMZN", "NVIDIA": "NVDA",
     "GOOGLE": "GOOG", "ALPHABET": "GOOG", "META": "META", "TESLA": "TSLA",
@@ -55,7 +59,12 @@ class Chunk:
 
 
 def parse_filename(filename: str) -> dict:
-    """Parse ticker, filing_type, period from filenames like AAPL_10K_2022Q3_2022-10-28_full.txt"""
+    """Parse ticker, filing_type, and period from corpus filenames.
+
+    Two filename formats exist in the corpus:
+      - AAPL_10K_2022Q3_2022-10-28_full.txt  (period explicitly present)
+      - GS_10K_2025-02-27_full.txt           (no period; year extracted from date)
+    """
     stem = Path(filename).stem.replace("_full", "")
     parts = stem.split("_")
 
@@ -63,7 +72,7 @@ def parse_filename(filename: str) -> dict:
     raw_type = parts[1]
     filing_type = "10-K" if raw_type == "10K" else "10-Q"
 
-    # parts[2] is either a quarter period (2022Q3) or a date (2025-02-27)
+    # parts[2] is either a quarter period (e.g. "2022Q3") or a date (e.g. "2025-02-27")
     if len(parts) >= 3 and re.match(r"^\d{4}Q\d$", parts[2]):
         period = parts[2]
     else:
@@ -77,7 +86,12 @@ def chunk_text(
     chunk_size: int = CHUNK_SIZE,
     overlap: int = CHUNK_OVERLAP,
 ) -> list[str]:
-    """Split text into overlapping token-based chunks."""
+    """Split text into overlapping token-based chunks.
+
+    Token-based splitting (vs. character or sentence) ensures each chunk fits
+    within the embedding model's context window regardless of word length.
+    Overlap preserves context for sentences that straddle chunk boundaries.
+    """
     tokens = _enc.encode(text)
     chunks = []
     start = 0
@@ -91,7 +105,11 @@ def chunk_text(
 
 
 def format_chunks(chunks: list[Chunk]) -> str:
-    """Format chunks for injection into the LLM prompt."""
+    """Serialize chunks into the labeled block format injected into the LLM prompt.
+
+    Each block is prefixed with [TICKER FILING_TYPE PERIOD] so the model can
+    produce inline citations that map back to specific filings.
+    """
     parts = []
     for c in chunks:
         parts.append(f"[{c.ticker} {c.filing_type} {c.period}]\n{c.text}")
@@ -102,8 +120,10 @@ _YEAR_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
 
 
 def parse_time_window(query: str) -> int | None:
-    """Return inclusive cutoff year if query contains 'last/past N years', else None.
-    E.g. 'last two years' in 2026 → 2024 (include 2024 and 2025, exclude 2023 and earlier).
+    """Return the inclusive cutoff year if the query specifies a relative time window.
+
+    Example: "last two years" in 2026 → 2024 (include 2024–2025, exclude 2023 and earlier).
+    Returns None if no time window is detected, meaning no date filtering is applied.
     """
     match = re.search(r"(?:last|past)\s+(\w+|\d+)\s+year", query.lower())
     if not match:
@@ -125,12 +145,10 @@ def detect_tickers(query: str) -> list[str]:
     query_upper = query.upper()
     found: set[str] = set()
 
-    # Match exact ticker symbols
     for ticker in KNOWN_TICKERS:
         if re.search(rf"\b{re.escape(ticker)}\b", query_upper):
             found.add(ticker)
 
-    # Match common company names and map to tickers
     for name, ticker in NAME_TO_TICKER.items():
         if re.search(rf"\b{re.escape(name)}\b", query_upper):
             found.add(ticker)
@@ -139,10 +157,25 @@ def detect_tickers(query: str) -> list[str]:
 
 
 def retrieve(query: str, openai_client, collection) -> list[Chunk]:
-    """Retrieve top-k relevant chunks from ChromaDB, filtered by time window if specified."""
+    """Retrieve the top-k most relevant chunks from ChromaDB for a given query.
+
+    Two key behaviors:
+
+    1. Per-ticker balanced retrieval: when multiple companies are mentioned,
+       a separate ChromaDB sub-query is fired per ticker. Without this, the
+       company with the most filings dominates raw semantic similarity results
+       and other companies get little or no coverage.
+
+    2. Time-window filtering at retrieval: if the query contains "last N years",
+       we fetch 3× more chunks than needed and discard those outside the window
+       before anything reaches the LLM. A prompt-only instruction ("don't cite
+       old data") is unreliable because the model still sees old chunks in its
+       context and uses them. Filtering here ensures the LLM never sees
+       out-of-window data in the first place.
+    """
     tickers = detect_tickers(query)
     cutoff_year = parse_time_window(query)
-    # Fetch extra chunks upfront so filtering doesn't leave us short
+    # Fetch extra chunks upfront to absorb losses from time-window filtering
     fetch_k = TOP_K * 3 if cutoff_year else TOP_K
 
     def embed(text: str) -> list[float]:
@@ -164,6 +197,9 @@ def retrieve(query: str, openai_client, collection) -> list[Chunk]:
         return yr is not None and yr >= cutoff_year
 
     if len(tickers) > 1:
+        # Fire one sub-query per ticker so each company gets fair representation.
+        # max(5, ...) ensures we always request a meaningful number even if there
+        # are many tickers and fetch_k // len(tickers) would round to a tiny value.
         per_ticker_k = max(5, fetch_k // len(tickers))
         seen: dict[str, Chunk] = {}
         for ticker in tickers:
@@ -173,12 +209,15 @@ def retrieve(query: str, openai_client, collection) -> list[Chunk]:
                 where={"ticker": ticker},
             )
             for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
+                # Deduplicate by first 80 chars to avoid near-identical chunks
+                # from overlapping windows of the same filing passage.
                 key = doc[:80]
                 if key not in seen:
                     seen[key] = make_chunk(doc, meta)
         chunks = [c for c in seen.values() if within_window(c)]
         return chunks[:TOP_K]
 
+    # Single-ticker or no-ticker path: one query with an optional ticker filter
     embedding = embed(query)
     kwargs: dict = {"query_embeddings": [embedding], "n_results": fetch_k}
     if len(tickers) == 1:
