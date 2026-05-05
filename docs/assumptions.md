@@ -2,19 +2,19 @@
 
 ## Build-time assumptions
 
-1. **Local ChromaDB is sufficient** — 246 filings at demo scale does not require a cloud vector DB. ChromaDB persists to disk and loads fast enough for a live demo. A managed service (Pinecone, Weaviate) would be appropriate at production scale.
+1. **Local ChromaDB is sufficient** - 246 filings at demo scale does not require a cloud vector DB. ChromaDB persists to disk and loads fast enough for a live demo. A managed service (Pinecone, Weaviate) would be appropriate at production scale.
 
-2. **Semantic search alone is adequate** — BM25 hybrid retrieval is not required for this corpus. The business questions are well-formed and embed meaningfully with `text-embedding-3-small`. Hybrid retrieval would improve precision for exact financial figures (e.g. specific dollar amounts) and would be a natural next step.
+2. **Semantic search alone is adequate** - BM25 hybrid retrieval is not required for this corpus. The business questions are well-formed and embed meaningfully with `text-embedding-3-small`. Hybrid retrieval would improve precision for exact financial figures (e.g. specific dollar amounts) and would be a natural next step.
 
-3. **No reranking step** — Top-15 cosine similarity results provide sufficient quality for this corpus size. A cross-encoder reranker (e.g. Cohere Rerank) could be added as a future improvement to boost precision on ambiguous queries.
+3. **No reranking step** - Top-15 cosine similarity results provide sufficient quality for this corpus size. A cross-encoder reranker (e.g. Cohere Rerank) could be added as a future improvement to boost precision on ambiguous queries.
 
-4. **Multi-company detection is keyword-based** — Ticker symbols and plain-English company names in the query are detected via string matching against a known ticker list. No NER model is needed at this scale; the known-company universe is fixed and small.
+4. **Multi-company detection is keyword-based** - Ticker symbols and plain-English company names in the query are detected via string matching against a known ticker list. No NER model is needed at this scale; the known-company universe is fixed and small.
 
-5. **Index is pre-built before the demo** — `index.py` is run once offline. Cold-start indexing time (~10–15 minutes for 246 filings) is not part of the live query flow.
+5. **Index is pre-built before the demo** - `index.py` is run once offline. Cold-start indexing time (~10–15 minutes for 246 filings) is not part of the live query flow.
 
-6. **Single question/answer paradigm** — The UI does not maintain conversation history. Each query is independent, which maps cleanly onto the single-LLM-call constraint.
+6. **Single question/answer paradigm** - The UI does not maintain conversation history. Each query is independent, which maps cleanly onto the single-LLM-call constraint.
 
-7. **No authentication or rate limiting** — Demo-only system; no user auth, API key management, or production hardening required.
+7. **No authentication or rate limiting** - Demo-only system; no user auth, API key management, or production hardening required.
 
 ---
 

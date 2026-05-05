@@ -34,13 +34,13 @@ CLIENT QUESTION:
 ## v2 — Date injection + temporal window flag (2026-05-02)
 
 **What changed:**
-- System prompt is now dynamic — today's date is injected at request time (`Today's date is {today}.`)
+- System prompt is now dynamic - today's date is injected at request time (`Today's date is {today}.`)
 - Added instruction: "If the question references a time window (e.g. 'last two years'), explicitly note any cited sources that fall outside that window"
 - Added negative constraints: do not speculate, do not combine figures across periods without flagging, do not infer data for companies with no relevant excerpts
 
 **Why:** Without a date anchor, the model has no basis to interpret relative time references like "the last two years." It would include 2023 data in a "last two years" query even though today is May 2026. Injecting the current date gives the model the context to reason about the time window. The temporal flagging instruction tells it to surface out-of-window sources explicitly rather than silently including stale data.
 
-**Outcome:** Improved citation transparency but the model still used out-of-window chunks in its answers — the instruction competed with the in-context evidence and lost. Led directly to v2.1.
+**Outcome:** Improved citation transparency but the model still used out-of-window chunks in its answers. The instruction competed with the in-context evidence and lost. Led directly to v2.1.
 
 ---
 
